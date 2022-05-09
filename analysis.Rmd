@@ -1,0 +1,96 @@
+---
+title: "analysis"
+author: "Will Schrepferman"
+date: "5/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(stringdist)
+```
+
+
+```{r read_data}
+# read DIME data
+indiana_donations_204 <- read_csv("data/in_conts.csv") %>%
+  clean_names() %>%
+  mutate(zip = as.double(substr(contributor_zipcode, 1, 5)))
+
+# read Zip Code data
+
+indiana_zips <- read_csv("data/county_zip.csv")
+
+# match zip codes (present in DIME) to counties (not present originally in DIME)
+
+indiana_donations <- left_join(indiana_donations, indiana_zips, by = "zip")
+
+# make full first_last name
+
+indiana_donations <- indiana_donations %>%
+  mutate(fullname = paste(contributor_fname, contributor_lname, sep = " "))
+
+# remove data from counties that could not be scraped
+
+indiana_sb <- read_csv("data/2014sbmembers.csv") %>%
+  mutate(fullname = tolower(Results)) %>%
+  filter(fullname != "unavailable") %>%
+  select(fullname, District)
+
+```
+
+```{r baseline}
+
+# baseline cfscore for each county
+
+baseline <- indiana_donations %>%
+  group_by(county) %>%
+  summarize(avg = mean(contributor_cfscore))
+```
+
+
+
+```{r match}
+
+# empty tibble to pass matched data
+
+matched_df <- tibble(
+  fullname_orig = character(),
+  fullname_matched = character(),
+  stringdist = numeric(),
+  district = character(),
+  county = character(),
+  cf_score = numeric()
+)
+
+# iterate through school board members, find nearest string match in cfscore database, combine relevant data
+
+for (i in 1:length(indiana_sb$fullname)){
+  index_match <- amatch(indiana_sb$fullname[i], indiana_donations$fullname, maxDist = 100)
+  
+  temp_fullname_orig <- indiana_sb$fullname[i]
+  temp_fullname_matched <- indiana_donations$fullname[index_match]
+  temp_stringdist <- stringdist(temp_fullname_orig, temp_fullname_matched)
+  temp_county <- indiana_donations$county[index_match]
+  temp_district <- indiana_sb$District[i]
+  temp_cf_score <- indiana_donations$contributor_cfscore[index_match]
+  
+  matched_df <- matched_df %>%
+    add_row(
+        fullname_orig = temp_fullname_orig,
+        fullname_matched = temp_fullname_matched,
+        stringdist = temp_stringdist,
+        district = temp_district,
+        county = temp_county,
+        cf_score = temp_cf_score
+    )
+}
+
+left_join(matched_df, baseline, by = "county")
+
+view(matched_df)
+
+```
+
